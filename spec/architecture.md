@@ -58,9 +58,9 @@ Szenen sollen keine globale Spiellogik duplizieren. Persistenter Zustand wird ü
 
 Die Gameplay-Szene verwendet voneinander getrennte Systeme mit kleinen, gut testbaren Verantwortlichkeiten:
 
-- **InputSystem:** normalisiert Tastatur, Maus, Touch und Gamepad in Spielaktionen.
-- **PlayerSystem:** Bewegung, Fähigkeiten, Schaden, Leben und Respawn.
-- **WormSystem:** Erzeugung, Verhalten, Kollisionen und Lebenszyklus der Würmer.
+- **InputSystem:** normalisiert Maus- und Touch-Eingaben in ein gemeinsames Bewegungsziel.
+- **PlayerSystem:** Bewegung, Fähigkeiten, Schaden, Leben und Respawn des Spielers.
+- **WormSystem:** Erzeugung, Segmentverwaltung, Wachstum, Kollisionen und Lebenszyklus der Würmer.
 - **WorldSystem:** Leveldaten, Hindernisse, Sammelobjekte und Weltgrenzen.
 - **CollisionSystem:** kapselt Kollisionsregeln und meldet Gameplay-Ereignisse.
 - **ScoreSystem:** Punkte, Fortschritt und relevante Spielstatistiken.
@@ -68,6 +68,33 @@ Die Gameplay-Szene verwendet voneinander getrennte Systeme mit kleinen, gut test
 - **UISystem:** HUD, Statusanzeigen, Pause und Fehlermeldungen.
 
 Systeme kommunizieren vorzugsweise über Daten und Ereignisse statt über direkte Querabhängigkeiten.
+
+## Zentrale Spielmechanik
+
+Das Spiel folgt dem Worms-Prinzip: Der Spieler steuert einen Wurm, der aus einem Kopf und einer geordneten Folge von Segmenten besteht. Characters sind fressbare Ziele in der Spielwelt. Wird ein Character vom Wurm gefressen, wächst der Wurm dauerhaft um eine definierte Anzahl von Segmenten.
+
+### Wurm und Wachstum
+
+- Der Wurm besitzt mindestens `headPosition`, `segments`, `direction`, `speed` und `length`.
+- Die Segmentpositionen folgen der zuvor vom Kopf durchlaufenen Route. Dadurch bleibt die Bewegung auch bei variabler Framerate stabil.
+- Ein gültiger Fresskontakt erzeugt genau ein `CharacterEaten`-Ereignis.
+- Das `WormSystem` verarbeitet das Ereignis, erhöht Länge und Score und fügt die neuen Segmente am Schwanz hinzu.
+- Ein bereits gefressener Character wird sofort deaktiviert, damit er nicht mehrfach gezählt wird.
+- Wachstum verändert die Kollisionsfläche und die sichtbare 3D-Geometrie synchron.
+- Kollisionen mit dem Spielfeldrand, Hindernissen oder dem eigenen Körper werden als eigene Regeln behandelt und dürfen das Wachstum nicht stillschweigend rückgängig machen.
+
+### Maus- und Touch-Steuerung
+
+Maus und Touch steuern beide dasselbe Bewegungsziel. Die Eingabe wird relativ zur Spielfläche in Weltkoordinaten umgerechnet und an das `WormSystem` übergeben.
+
+- **Maus:** Pointer-Bewegung oder Klick-/Drag-Ziel bestimmen die gewünschte Richtung.
+- **Touch:** Ein Finger-Drag oder virtuelles Ziel auf der Spielfläche bestimmt die gewünschte Richtung.
+- Pointer- und Touch-Ereignisse werden über Phaser vereinheitlicht; die Gameplay-Systeme kennen keine DOM-Eventtypen.
+- Kurze Eingaben dürfen nicht zum unbeabsichtigten Scrollen oder Zoomen der Spielfläche führen.
+- Bei fehlendem aktiven Pointer-Ziel hält der Wurm seine letzte gültige Richtung.
+- Die Steuerung muss auf Desktop und mobilen Viewports mit responsiver Spielfläche funktionieren.
+
+Die Input-Daten enthalten mindestens `position`, `direction`, `isActive` und einen Zeitstempel. Das `InputSystem` begrenzt extreme Richtungsänderungen, damit der Wurm nicht in einem einzigen Frame unkontrolliert umkehrt.
 
 ### 4. 3D-Rendering
 
@@ -85,13 +112,14 @@ Für die erste Version gilt:
 
 Die Gameplay-Szene verarbeitet jeden Frame in dieser Reihenfolge:
 
-1. Eingaben lesen und in Aktionen umwandeln.
-2. Spieler- und Gegnerzustände aktualisieren.
-3. Welt- und Kollisionsregeln auswerten.
-4. Spielereignisse wie Schaden, Sammeln oder Sieg verteilen.
-5. Kamera und 3D-Objekte mit dem neuen Zustand synchronisieren.
-6. HUD und Audio anhand relevanter Änderungen aktualisieren.
-7. Phaser rendert den aktuellen Frame.
+1. Maus- und Touch-Eingaben lesen und in ein Bewegungsziel umwandeln.
+2. Kopfposition und Segmentroute des Spielwurms aktualisieren.
+3. Characters, Hindernisse, Spielfeldgrenzen und Körpersegmente auf Kollisionen prüfen.
+4. `CharacterEaten`-Ereignisse verarbeiten und den Wurm wachsen lassen.
+5. Spielereignisse wie Schaden, Sammeln, Wachstum oder Sieg verteilen.
+6. Kamera und 3D-Objekte mit dem neuen Zustand synchronisieren.
+7. HUD und Audio anhand relevanter Änderungen aktualisieren.
+8. Phaser rendert den aktuellen Frame.
 
 Zeitabhängige Bewegungen verwenden die von Phaser gelieferte Delta-Zeit. Die Spiellogik darf nicht von einer festen Framerate ausgehen.
 
@@ -167,10 +195,10 @@ Ladefehler werden sichtbar behandelt. Ein fehlendes Pflicht-Asset darf nicht sti
 
 ## Teststrategie
 
-- **Unit-Tests:** Zustandsübergänge, Punkteberechnung, Bewegungsregeln und Kollisionsregeln.
-- **Integrations-Tests:** Szenenwechsel, Asset-Laden und Zusammenspiel der Gameplay-Systeme.
-- **Browser-Tests:** Start des Spiels, Resize, Pause/Resume und ein kompletter kurzer Gameplay-Durchlauf.
-- **Manuelle Prüfung:** WebGL/Canvas-Fallback, Audio-Freigabe und Leistung auf unterschiedlichen Bildschirmgrößen.
+- **Unit-Tests:** Zustandsübergänge, Punkteberechnung, Bewegungsregeln, Segmentwachstum und Kollisionsregeln.
+- **Integrations-Tests:** Szenenwechsel, Asset-Laden, Fressen eines Characters und Zusammenspiel der Gameplay-Systeme.
+- **Browser-Tests:** Start des Spiels, Resize, Maussteuerung, Touch-Drag, Pause/Resume und ein kompletter kurzer Gameplay-Durchlauf.
+- **Manuelle Prüfung:** WebGL/Canvas-Fallback, Audio-Freigabe, Fressanimation, sichtbares Wurmwachstum und Leistung auf unterschiedlichen Bildschirmgrößen.
 
 ## Offene Architekturentscheidungen
 

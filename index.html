@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <title>Killerworms</title>
+  <style>
+    :root { color-scheme: dark; font-family: Georgia, 'Times New Roman', serif; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; background: #091411; overflow: hidden; }
+    body { display: grid; place-items: center; }
+    #game { width: 100vw; height: 100vh; }
+    canvas { display: block; touch-action: none; }
+    .loading { position: fixed; inset: 0; display: grid; place-items: center; color: #f2e7c9; letter-spacing: .12em; text-transform: uppercase; background: #091411; }
+    .loading.hidden { display: none; }
+  </style>
+</head>
+<body>
+  <div id="game"></div>
+  <div id="loading" class="loading">Killerworms wird geladen</div>
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
+  <script>
+    class GameScene extends Phaser.Scene {
+      constructor() { super('GameScene'); }
+
+      create() {
+        this.W = 2200;
+        this.H = 1400;
+        this.center = { x: this.W / 2, y: this.H / 2 };
+        this.pointerTarget = { x: this.center.x + 260, y: this.center.y };
+        this.pointerActive = false;
+        this.score = 0;
+        this.eaten = 0;
+        this.growFlash = 0;
+        this.worm = { x: this.center.x, y: this.center.y, angle: 0, speed: 260, radius: 28, spacing: 34, lengthSegments: 3 };
+        this.worm.path = [];
+        for (let i = 0; i < 40; i++) this.worm.path.push({ x: this.worm.x - i * 5, y: this.worm.y });
+        this.characters = [];
+        this.stars = [];
+        this.buildWorld();
+        this.spawnCharacters(12);
+        this.createUi();
+        this.createInput();
+        this.cameras.main.setBounds(0, 0, this.W, this.H);
+        this.cameras.main.startFollow(this.wormAnchor, true, 0.08, 0.08);
+        this.scale.on('resize', this.resizeUi, this);
+        this.resizeUi();
+        document.querySelector('#loading').classList.add('hidden');
+      }
+
+      buildWorld() {
+        this.background = this.add.graphics();
+        this.background.fillStyle(0x0f3026, 1).fillRect(0, 0, this.W, this.H);
+        for (let y = 0; y < this.H; y += 100) {
+          for (let x = 0; x < this.W; x += 100) {
+            const even = ((x / 100 + y / 100) % 2) === 0;
+            this.background.fillStyle(even ? 0x164437 : 0x123a30, 1);
+            this.background.fillRect(x, y, 100, 100);
+            this.background.lineStyle(2, 0x1e5744, 0.42).strokeRect(x, y, 100, 100);
+          }
+        }
+        this.background.lineStyle(20, 0x071b16, 1).strokeRect(12, 12, this.W - 24, this.H - 24);
+        this.background.lineStyle(4, 0xc79a48, 0.65).strokeRect(26, 26, this.W - 52, this.H - 52);
+        for (let i = 0; i < 50; i++) {
+          const x = Phaser.Math.Between(40, this.W - 40);
+          const y = Phaser.Math.Between(40, this.H - 40);
+          this.stars.push(this.add.circle(x, y, Phaser.Math.Between(2, 5), 0xb9d69b, 0.35).setDepth(1));
+        }
+        this.add.text(this.W / 2, 70, 'THE HUNGRY GROUND', { fontFamily: 'Georgia', fontSize: '22px', color: '#c79a48', letterSpacing: 6 }).setOrigin(.5).setAlpha(.7).setDepth(2);
+        this.wormGraphic = this.add.graphics().setDepth(10);
+        this.wormAnchor = this.add.circle(this.worm.x, this.worm.y, 1, 0xffffff, 0).setDepth(10);
+      }
+
+      spawnCharacters(count) {
+        for (let i = 0; i < count; i++) {
+          let x, y;
+          do { x = Phaser.Math.Between(100, this.W - 100); y = Phaser.Math.Between(110, this.H - 110); }
+          while (Phaser.Math.Distance.Between(x, y, this.worm.x, this.worm.y) < 280);
+          const hue = Phaser.Math.RND.pick([0xe99753, 0xd86a64, 0xe8bf67, 0x78b99b]);
+          const shadow = this.add.ellipse(x + 7, y + 12, 48, 18, 0x061510, 0.5).setDepth(4);
+          const body = this.add.container(x, y).setDepth(6);
+          const glow = this.add.circle(0, 0, 25, hue, 0.18);
+          const head = this.add.circle(0, -8, 15, hue, 1);
+          const coat = this.add.rectangle(0, 12, 25, 20, hue, 1);
+          const eye = this.add.circle(5, -11, 3, 0x17231c, 1);
+          body.add([glow, coat, head, eye]);
+          this.tweens.add({ targets: body, y: y - 8, duration: 900 + i * 70, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+          this.characters.push({ x, y, body, shadow, radius: 27, alive: true });
+        }
+      }
+
+      createUi() {
+        this.hud = this.add.container(0, 0).setScrollFactor(0).setDepth(100);
+        this.hud.add(this.add.rectangle(24, 24, 330, 92, 0x071d18, 0.9).setOrigin(0));
+        this.hud.add(this.add.rectangle(24, 24, 5, 92, 0xe99753, 1).setOrigin(0));
+        this.hud.add(this.add.text(48, 39, 'KILLERWORMS', { fontFamily: 'Georgia', fontSize: '19px', color: '#f2e7c9', fontStyle: 'bold' }));
+        this.hud.add(this.add.text(48, 69, 'THE HUNGRY GROUND', { fontFamily: 'Arial', fontSize: '10px', color: '#9fc3a2', letterSpacing: 2 }));
+        this.lengthText = this.add.text(280, 48, '07', { fontFamily: 'Georgia', fontSize: '28px', color: '#e99753', fontStyle: 'bold' }).setOrigin(1, 0);
+        this.hud.add(this.lengthText);
+        this.hud.add(this.add.text(280, 80, 'LENGTH', { fontFamily: 'Arial', fontSize: '9px', color: '#9fc3a2', letterSpacing: 1 }).setOrigin(1, 0));
+        this.scoreText = this.add.text(0, 0, 'SCORE  0000', { fontFamily: 'Arial', fontSize: '13px', color: '#f2e7c9', letterSpacing: 2 }).setOrigin(1, 0);
+        this.hud.add(this.scoreText);
+        this.hint = this.add.text(0, 0, 'MOVE THE WORM  •  EAT THE CHARACTERS', { fontFamily: 'Arial', fontSize: '12px', color: '#b9d69b', letterSpacing: 2 }).setOrigin(.5, 1).setAlpha(.9);
+        this.hud.add(this.hint);
+        this.targetRing = this.add.circle(0, 0, 26, 0xe99753, 0).setStrokeStyle(2, 0xe99753, .75).setScrollFactor(0).setDepth(90).setVisible(false);
+      }
+
+      createInput() {
+        this.input.on('pointermove', pointer => this.setTarget(pointer));
+        this.input.on('pointerdown', pointer => { this.pointerActive = true; this.setTarget(pointer); });
+        this.input.on('pointerup', () => { this.pointerActive = false; });
+        this.input.on('pointerout', () => { this.pointerActive = false; });
+      }
+
+      setTarget(pointer) {
+        const point = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
+        this.pointerTarget.x = Phaser.Math.Clamp(point.x, 60, this.W - 60);
+        this.pointerTarget.y = Phaser.Math.Clamp(point.y, 60, this.H - 60);
+        this.pointerActive = true;
+        this.targetRing.setPosition(pointer.x, pointer.y).setVisible(true);
+      }
+
+      update(time, delta) {
+        const dt = Math.min(delta / 1000, 0.035);
+        const worm = this.worm;
+        const desiredAngle = Phaser.Math.Angle.Between(worm.x, worm.y, this.pointerTarget.x, this.pointerTarget.y);
+        worm.angle = Phaser.Math.Angle.RotateTo(worm.angle, desiredAngle, 4.8 * dt);
+        worm.x = Phaser.Math.Clamp(worm.x + Math.cos(worm.angle) * worm.speed * dt, 60, this.W - 60);
+        worm.y = Phaser.Math.Clamp(worm.y + Math.sin(worm.angle) * worm.speed * dt, 60, this.H - 60);
+        const lastPathPoint = worm.path[0];
+        if (!lastPathPoint || Phaser.Math.Distance.Between(worm.x, worm.y, lastPathPoint.x, lastPathPoint.y) > 5) {
+          worm.path.unshift({ x: worm.x, y: worm.y });
+          if (worm.path.length > 360) worm.path.pop();
+        }
+        this.updateWormVisuals();
+        this.checkEating();
+        this.lengthText.setText(String(this.worm.lengthSegments).padStart(2, '0'));
+        this.scoreText.setText(`SCORE  ${String(this.score).padStart(4, '0')}`);
+        this.targetRing.setAlpha(.55 + Math.sin(time / 180) * .2);
+        if (this.growFlash > 0) this.growFlash -= dt;
+      }
+
+      updateWormVisuals() {
+        this.wormGraphic.clear();
+        const stride = this.worm.spacing;
+        const count = this.worm.lengthSegments;
+        for (let i = count - 1; i >= 0; i--) {
+          const p = this.worm.path[Math.min(this.worm.path.length - 1, Math.floor(i * stride / 5))];
+          const isHead = i === 0;
+          const scale = isHead ? 1 : Math.max(.58, 1 - i / (count * 2.8));
+          this.wormGraphic.fillStyle(0x061510, .5);
+          this.wormGraphic.fillEllipse(p.x + 9, p.y + 14, 58 * scale, 19 * scale);
+          this.wormGraphic.fillStyle(isHead ? 0xe99753 : 0xc96849, 1);
+          this.wormGraphic.fillCircle(p.x, p.y - 6, 28 * scale);
+          this.wormGraphic.lineStyle(3, isHead ? 0xffd88d : 0xf5ab66, .7);
+          this.wormGraphic.strokeCircle(p.x, p.y - 6, 28 * scale);
+          if (isHead) {
+            this.wormGraphic.fillStyle(0x13241c, 1);
+            this.wormGraphic.fillCircle(p.x + 11, p.y - 15, 5);
+            this.wormGraphic.fillCircle(p.x + 19, p.y - 8, 5);
+          }
+        }
+        const head = this.worm.path[0];
+        this.wormAnchor.setPosition(head.x, head.y);
+      }
+
+      checkEating() {
+        const head = this.worm.path[0];
+        for (const character of this.characters) {
+          if (!character.alive) continue;
+          if (Phaser.Math.Distance.Between(head.x, head.y, character.x, character.y) < this.worm.radius + character.radius) {
+            character.alive = false;
+            this.eaten++;
+            this.score += 100;
+            this.worm.lengthSegments += 1;
+            this.tweens.add({ targets: character.body, scale: 1.6, alpha: 0, duration: 220, ease: 'Back.easeIn' });
+            this.tweens.add({ targets: character.shadow, scaleX: 0, scaleY: 0, alpha: 0, duration: 220 });
+            this.cameras.main.shake(90, .002);
+            if (this.eaten % 4 === 0) this.spawnCharacters(4);
+          }
+        }
+      }
+
+      resizeUi() {
+        const width = this.scale.width;
+        const height = this.scale.height;
+        this.scoreText.setPosition(width - 28, 39);
+        this.hint.setPosition(width / 2, height - 28);
+      }
+    }
+
+    const config = {
+      type: Phaser.AUTO,
+      parent: 'game',
+      backgroundColor: '#0f3026',
+      width: 1280,
+      height: 720,
+      scale: { mode: Phaser.Scale.RESIZE, autoCenter: Phaser.Scale.CENTER_BOTH },
+      render: { antialias: true, pixelArt: false },
+      input: { activePointers: 3 },
+      scene: [GameScene]
+    };
+    new Phaser.Game(config);
+  </script>
+</body>
+</html>
